@@ -1,5 +1,5 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
@@ -54,6 +54,25 @@ function CameraSetup({ treeData }: { treeData: TreeData }) {
   return null;
 }
 
+// Hide labels when camera is further away than this Z distance.
+// At this zoom level individual nodes are too small for readable text,
+// so we remove all 153 Html DOM overlays for a significant perf gain.
+const LABEL_SHOW_THRESHOLD = 130;
+
+// Inner component (inside Canvas) that watches camera Z and notifies parent
+// only when the label-visibility threshold is crossed — never every frame.
+function LabelLOD({ onChange }: { onChange: (visible: boolean) => void }) {
+  const prev = useRef(true);
+  useFrame(({ camera }) => {
+    const visible = camera.position.z < LABEL_SHOW_THRESHOLD;
+    if (visible !== prev.current) {
+      prev.current = visible;
+      onChange(visible);
+    }
+  });
+  return null;
+}
+
 interface SceneContentProps {
   treeData: TreeData;
   selectedId: string | null;
@@ -63,11 +82,13 @@ interface SceneContentProps {
 }
 
 function SceneContent({ treeData, selectedId, onSelect, rootId, controlsRef }: SceneContentProps) {
-  const rootNode = treeData.nodes.find(n => n.id === rootId);
+  const [showLabels, setShowLabels] = useState(true);
+  const rootNode = useMemo(() => treeData.nodes.find(n => n.id === rootId), [treeData.nodes, rootId]);
 
   return (
     <>
       <CameraSetup treeData={treeData} />
+      <LabelLOD onChange={setShowLabels} />
 
       <ambientLight intensity={0.28} color="#3A2400" />
       <pointLight position={[0, 10, 18]}  intensity={1.6} color="#C9A227" decay={2} />
@@ -102,6 +123,7 @@ function SceneContent({ treeData, selectedId, onSelect, rootId, controlsRef }: S
           isRoot={node.id === rootId}
           isSelected={node.id === selectedId}
           onSelect={onSelect}
+          showLabel={showLabels}
         />
       ))}
 
@@ -192,6 +214,8 @@ export function TreeScene({ treeData, rootId, onSelectPerson }: Props) {
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
       <Canvas
         camera={{ fov: 45, near: 0.1, far: 1500 }}
+        dpr={[1, 2]}
+        performance={{ min: 0.5 }}
         gl={{
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,

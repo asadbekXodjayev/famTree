@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { memo, useRef, useState, useCallback } from 'react';
 import { Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -19,9 +19,10 @@ interface Props {
   isRoot: boolean;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  showLabel: boolean;
 }
 
-export function PersonNode({ node, isRoot, isSelected, onSelect }: Props) {
+export const PersonNode = memo(function PersonNode({ node, isRoot, isSelected, onSelect, showLabel }: Props) {
   const ringRef  = useRef<THREE.Mesh>(null!);
   const glowRef  = useRef<THREE.Mesh>(null!);
   const groupRef = useRef<THREE.Group>(null!);
@@ -128,50 +129,52 @@ export function PersonNode({ node, isRoot, isSelected, onSelect }: Props) {
         </mesh>
       )}
 
-      {/* Name label */}
-      <Html
-        center
-        position={[0, isRoot ? -0.06 : -0.04, 0.06]}
-        distanceFactor={10}
-        style={{ pointerEvents: 'none', userSelect: 'none' }}
-        zIndexRange={[1, 2]}
-      >
-        <div style={{ textAlign: 'center', fontFamily: "'Georgia', serif" }}>
-          <div
-            style={{
-              fontSize: isRoot ? 15 : 9,
-              fontWeight: isRoot ? 700 : 400,
-              color: isSelected
-                ? CREAM
-                : isRoot
-                  ? GOLD_BRIGHT
-                  : hovered
-                    ? CREAM
-                    : 'rgba(246,241,233,0.82)',
-              whiteSpace: 'nowrap',
-              textShadow: '0 1px 5px rgba(0,0,0,0.98)',
-              letterSpacing: '0.01em',
-              lineHeight: 1.2,
-            }}
-          >
-            {isRoot ? node.person.name : shortName}
-          </div>
-          {isRoot && (
+      {/* Name label — hidden when zoomed out (showLabel=false) except for root */}
+      {(showLabel || isRoot) && (
+        <Html
+          center
+          position={[0, isRoot ? -0.06 : -0.04, 0.06]}
+          distanceFactor={10}
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+          zIndexRange={[1, 2]}
+        >
+          <div style={{ textAlign: 'center', fontFamily: "'Georgia', serif" }}>
             <div
               style={{
-                fontSize: 6,
-                color: 'rgba(201,162,39,0.65)',
-                letterSpacing: '0.18em',
-                textTransform: 'uppercase',
-                marginTop: 3,
+                fontSize: isRoot ? 15 : 9,
+                fontWeight: isRoot ? 700 : 400,
+                color: isSelected
+                  ? CREAM
+                  : isRoot
+                    ? GOLD_BRIGHT
+                    : hovered
+                      ? CREAM
+                      : 'rgba(246,241,233,0.82)',
                 whiteSpace: 'nowrap',
+                textShadow: '0 1px 5px rgba(0,0,0,0.98)',
+                letterSpacing: '0.01em',
+                lineHeight: 1.2,
               }}
             >
-              АСОСЧИ
+              {isRoot ? node.person.name : shortName}
             </div>
-          )}
-        </div>
-      </Html>
+            {isRoot && (
+              <div
+                style={{
+                  fontSize: 6,
+                  color: 'rgba(201,162,39,0.65)',
+                  letterSpacing: '0.18em',
+                  textTransform: 'uppercase',
+                  marginTop: 3,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                АСОСЧИ
+              </div>
+            )}
+          </div>
+        </Html>
+      )}
     </group>
   );
-}
+});
