@@ -14,8 +14,22 @@
 html, body, #root {
   width: 100%;
   height: 100%;
+  /* Use small viewport height unit so mobile browser chrome doesn't cut off */
+  height: 100svh;
   overflow: hidden;
   background: #080401;
+}
+
+/* Prevent iOS bounce scroll from fighting our touch pan */
+body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}
+
+/* SVG text crisp rendering */
+svg text {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -92,7 +92,7 @@ export function HUD({ totalNodes, selectedName }: Props) {
           <>
             <div style={{ width: 1, height: 14, background: 'rgba(201,162,39,0.2)' }} />
             <div style={{ fontSize: 10, color: 'rgba(201,162,39,0.5)' }}>
-              Сурганг / сиртга чанг = ҳаракат · + / − = яқинлаш
+              Сурганг = ҳаракат · Ctrl+ғилдирак = яқинлаш · ↑↓ = кейинги
             </div>
           </>
         )}
