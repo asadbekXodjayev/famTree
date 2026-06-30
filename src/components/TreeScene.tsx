@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Stars } from '@react-three/drei';
+import { MapControls, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { PersonNode } from './PersonNode';
@@ -131,14 +131,16 @@ function SceneContent({ treeData, selectedId, onSelect, rootId, controlsRef }: S
         <Bloom intensity={1.15} luminanceThreshold={0.2} luminanceSmoothing={0.75} mipmapBlur />
       </EffectComposer>
 
-      {/* No rotation — only pan + zoom */}
-      <OrbitControls
+      {/* MapControls: left-click / one-finger swipe = PAN (vs OrbitControls
+          which maps one finger to rotate). Right-click = rotate (disabled).
+          This makes touch navigation feel natural — swipe to explore the tree. */}
+      <MapControls
         ref={controlsRef}
         enableRotate={false}
         enablePan
         screenSpacePanning
         enableDamping
-        dampingFactor={0.08}
+        dampingFactor={0.18}
         minDistance={5}
         maxDistance={420}
         makeDefault

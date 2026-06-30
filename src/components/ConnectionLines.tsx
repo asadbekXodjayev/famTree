@@ -5,53 +5,63 @@ import type { Connection } from '../lib/types';
 import { NODE_RADIUS, V_SPACING } from '../lib/treeLayout';
 
 const BRANCH_ARM    = (V_SPACING - NODE_RADIUS * 2) * 0.38;
-const CURVE_SEGS    = 28;               // segments passed to getPoints()
-const TOTAL_VERTS   = CURVE_SEGS + 1;  // 29 actual vertices
-const GEN_DELAY     = 0.38;            // seconds of stagger per generation depth
-const DRAW_DURATION = 0.52;            // seconds to fully reveal one branch
+const CURVE_SEGS    = 28;
+const WIPE_DURATION = 2.2;  // seconds for the full curtain to sweep the tree
 
-// Single shared material — one GPU allocation for all lines.
-// Opacity slightly higher than original (0.58) to compensate for 1 px width
-// (bloom post-processing adds visible glow regardless).
-const lineMaterial = new THREE.LineBasicMaterial({
-  color: 0xC9A227,
+// Fragment shader: discard anything ABOVE the current wipe line.
+// As uWipeY decreases (moves downward in world space), branches are
+// revealed from the root toward the leaves — top-to-bottom wipe.
+// Siblings that spread sideways become visible together as the curtain
+// passes through their shared starting point, producing the "wipe to
+// the sides" effect naturally from the Bezier geometry.
+const vertexShader = /* glsl */`
+  varying float vWorldY;
+  void main() {
+    vec4 world = modelMatrix * vec4(position, 1.0);
+    vWorldY     = world.y;
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+
+const fragmentShader = /* glsl */`
+  uniform vec3  uColor;
+  uniform float uWipeY;   // sweeps from wipeStart (high Y) down to wipeEnd (low Y)
+  uniform float uOpacity;
+  varying float vWorldY;
+  void main() {
+    // Discard fragments that are still ABOVE the wipe curtain
+    if (vWorldY > uWipeY) discard;
+    gl_FragColor = vec4(uColor, uOpacity);
+  }
+`;
+
+// Single shared ShaderMaterial — one `uWipeY` uniform update per frame
+// controls the reveal for all 150+ branches simultaneously, with zero
+// per-branch cost.
+const wipeMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uColor:   { value: new THREE.Color(0xC9A227) },
+    uWipeY:   { value: -999 },   // will be set on mount
+    uOpacity: { value: 0.72 },
+  },
+  vertexShader,
+  fragmentShader,
   transparent: true,
-  opacity: 0.72,
+  depthWrite: false,
 });
 
-interface BranchEntry {
-  line: THREE.Line;
-  geo:  THREE.BufferGeometry;
-  delay: number;
-}
-
-function buildBranches(connections: Connection[], skipAnim: boolean): BranchEntry[] {
+function buildBranches(connections: Connection[]) {
   return connections.map(conn => {
     const start = new THREE.Vector3(conn.fromPos[0], conn.fromPos[1] - NODE_RADIUS, 0);
     const end   = new THREE.Vector3(conn.toPos[0],   conn.toPos[1]   + NODE_RADIUS, 0);
-
-    // Leave/arrive vertically, then S-curve to the child
-    const cp1 = new THREE.Vector3(start.x, start.y - BRANCH_ARM, 0);
-    const cp2 = new THREE.Vector3(end.x,   end.y   + BRANCH_ARM, 0);
+    const cp1   = new THREE.Vector3(start.x, start.y - BRANCH_ARM, 0);
+    const cp2   = new THREE.Vector3(end.x,   end.y   + BRANCH_ARM, 0);
 
     const pts = new THREE.CubicBezierCurve3(start, cp1, cp2, end).getPoints(CURVE_SEGS);
-    const geo = new THREE.BufferGeometry().setFromPoints(pts);
-
-    // Animation direction:
-    //   • Points 0→N naturally go from parent (top) toward child (bottom/sides).
-    //   • Siblings whose child.x ≠ parent.x will appear to "wipe to the side"
-    //     as mid-curve points spread horizontally after the initial downward drop.
-    //   • drawRange(0, n) reveals the first n vertices — top-to-bottom for a
-    //     straight branch, top-then-sideways for lateral ones.
-    geo.setDrawRange(0, skipAnim ? TOTAL_VERTS : 0);
-
-    const line = new THREE.Line(geo, lineMaterial);
+    const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(geo, wipeMaterial);
     line.frustumCulled = false;
-
-    // Stagger by generation so the tree "grows" level by level.
-    // fromPos[1] = -generation * V_SPACING  →  generation = -fromPos[1] / V_SPACING
-    const generation = Math.round(-conn.fromPos[1] / V_SPACING);
-    return { line, geo, delay: generation * GEN_DELAY };
+    return { line, geo };
   });
 }
 
@@ -61,7 +71,8 @@ interface Props {
 
 export const ConnectionLines = memo(function ConnectionLines({ connections }: Props) {
   const groupRef  = useRef<THREE.Group>(null!);
-  const mountedAt = useRef(-1);          // clock time at first useFrame tick
+  const mountedAt = useRef(-1);
+  const animDone  = useRef(false);
 
   const skipAnim = useMemo(
     () =>
@@ -70,13 +81,26 @@ export const ConnectionLines = memo(function ConnectionLines({ connections }: Pr
     [],
   );
 
-  const branches = useMemo(
-    () => buildBranches(connections, skipAnim),
-    [connections, skipAnim],
-  );
+  // wipeStart: just above the topmost branch vertex (root's outgoing edge at Y ≈ -0.75)
+  // wipeEnd:   below the lowest branch endpoint so everything becomes visible
+  const { wipeStart, wipeEnd } = useMemo(() => {
+    if (connections.length === 0) return { wipeStart: 0, wipeEnd: -10 };
+    const deepest = Math.min(...connections.map(c => c.toPos[1]));
+    return {
+      wipeStart: NODE_RADIUS * 0.5,          // slightly above first branch vertex
+      wipeEnd:   deepest - NODE_RADIUS - 1,  // below the lowest branch
+    };
+  }, [connections]);
 
-  // Attach/detach THREE.Line objects directly — no React state involved,
-  // so animation never triggers a re-render.
+  const branches = useMemo(() => buildBranches(connections), [connections]);
+
+  // Initialise the wipe position before the first render
+  useEffect(() => {
+    mountedAt.current = -1;
+    animDone.current  = false;
+    wipeMaterial.uniforms.uWipeY.value = skipAnim ? wipeEnd : wipeStart;
+  }, [skipAnim, wipeStart, wipeEnd]);
+
   useEffect(() => {
     const group = groupRef.current;
     if (!group) return;
@@ -90,18 +114,20 @@ export const ConnectionLines = memo(function ConnectionLines({ connections }: Pr
   }, [branches]);
 
   useFrame(({ clock }) => {
-    if (skipAnim) return;
+    if (skipAnim || animDone.current) return;
 
-    // Record the clock time on first invocation so the animation always starts
-    // from zero relative to mount time, regardless of canvas uptime.
     if (mountedAt.current < 0) mountedAt.current = clock.elapsedTime;
-    const t = clock.elapsedTime - mountedAt.current;
+    const t = (clock.elapsedTime - mountedAt.current) / WIPE_DURATION;
 
-    for (const { geo, delay } of branches) {
-      const p = Math.min(1, Math.max(0, (t - delay) / DRAW_DURATION));
-      // p=0 → invisible; p=1 → all TOTAL_VERTS drawn
-      geo.setDrawRange(0, p > 0 ? Math.ceil(p * TOTAL_VERTS) : 0);
+    if (t >= 1) {
+      wipeMaterial.uniforms.uWipeY.value = wipeEnd;
+      animDone.current = true;
+      return;
     }
+
+    // Cubic ease-out: fast start, gentle settle
+    const ease = 1 - Math.pow(1 - t, 3);
+    wipeMaterial.uniforms.uWipeY.value = wipeStart + ease * (wipeEnd - wipeStart);
   });
 
   return <group ref={groupRef} />;
