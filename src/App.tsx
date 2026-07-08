@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { AuthModal } from './components/AuthModal';
+import { JoinBanner, ManageDialog, ReviewDialog, VersionsDialog } from './components/dialogs';
 import { TopBar } from './components/TopBar';
 import { TreeView } from './components/TreeView';
-import { useTree, type TreeSource } from './hooks/useTree';
+import { useTreeSession, type TreeSource } from './hooks/useTreeSession';
 import { api } from './lib/api';
 import type { TreeSummary } from './lib/types';
 
@@ -29,6 +30,8 @@ function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }
   );
 }
 
+type Dialog = 'share' | 'history' | 'review' | null;
+
 function Workspace() {
   const { user, status, logout } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
@@ -36,6 +39,10 @@ function Workspace() {
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [treesLoading, setTreesLoading] = useState(false);
   const [treesError, setTreesError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [joinToken, setJoinToken] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('invite'),
+  );
 
   const loadTrees = useCallback(async (preferId?: number) => {
     setTreesLoading(true);
@@ -65,6 +72,11 @@ function Workspace() {
     }
   }, [status, loadTrees]);
 
+  // Invite links: prompt sign-in if needed, then show the join banner.
+  useEffect(() => {
+    if (joinToken && status === 'anon') setAuthOpen(true);
+  }, [joinToken, status]);
+
   const source: TreeSource | null =
     status === 'authed'
       ? currentId != null
@@ -74,7 +86,13 @@ function Workspace() {
         ? { kind: 'demo' }
         : null;
 
-  const t = useTree(source);
+  const session = useTreeSession(source);
+
+  const currentSummary = useMemo(
+    () => trees.find((t) => t.id === currentId) ?? null,
+    [trees, currentId],
+  );
+  const pendingCount = currentSummary?.pendingCount ?? 0;
 
   const onNew = async () => {
     try {
@@ -87,21 +105,22 @@ function Workspace() {
     }
   };
   const onRename = async () => {
-    if (currentId == null || !t.tree) return;
+    if (currentId == null || !session.tree) return;
     try {
-      const title = window.prompt('Новое название древа:', t.tree.title);
+      const title = window.prompt('Новое название древа:', session.tree.title);
       if (!title || !title.trim()) return;
       await api.renameTree(currentId, title.trim());
       await loadTrees(currentId);
-      await t.reload();
+      await session.reload();
     } catch (e) {
       alert('Не удалось переименовать: ' + (e as Error).message);
     }
   };
   const onDelete = async () => {
-    if (currentId == null || !t.tree) return;
+    if (currentId == null || !session.tree) return;
     try {
-      if (!window.confirm('Удалить древо «' + t.tree.title + '» полностью? Это необратимо.')) return;
+      if (!window.confirm('Удалить древо «' + session.tree.title + '» полностью? Это необратимо.'))
+        return;
       await api.deleteTree(currentId);
       setCurrentId(null);
       await loadTrees();
@@ -110,12 +129,18 @@ function Workspace() {
     }
   };
 
+  const afterJoin = async (treeId: number) => {
+    setJoinToken(null);
+    window.history.replaceState(null, '', window.location.pathname);
+    await loadTrees(treeId);
+  };
+
   if (status === 'loading') return <Splash />;
 
   const treeMatches =
-    !!t.tree &&
-    ((source?.kind === 'tree' && t.tree.id === source.id) ||
-      (source?.kind === 'demo' && !!t.tree.demo));
+    !!session.tree &&
+    ((source?.kind === 'tree' && session.tree.id === source.id) ||
+      (source?.kind === 'demo' && !!session.tree.demo));
 
   let main: ReactNode;
   if (status === 'authed' && treesLoading && trees.length === 0) {
@@ -131,10 +156,10 @@ function Workspace() {
         </button>
       </div>
     );
-  } else if (t.error && !treeMatches) {
-    main = <ErrorBox message={t.error} onRetry={() => void t.reload()} />;
+  } else if (session.error && !treeMatches) {
+    main = <ErrorBox message={session.error} onRetry={() => void session.reload()} />;
   } else if (treeMatches) {
-    main = <TreeView key={source?.kind === 'tree' ? `t${source.id}` : 'demo'} t={t} />;
+    main = <TreeView key={source?.kind === 'tree' ? `t${source.id}` : 'demo'} session={session} />;
   } else {
     main = <Splash />;
   }
@@ -145,14 +170,56 @@ function Workspace() {
         email={user?.email ?? null}
         trees={trees}
         currentId={currentId}
+        currentRole={session.role}
+        pendingCount={pendingCount}
         onSelect={setCurrentId}
         onNew={() => void onNew()}
         onRename={() => void onRename()}
         onDelete={() => void onDelete()}
+        onShare={() => setDialog('share')}
+        onHistory={() => setDialog('history')}
+        onReview={() => setDialog('review')}
         onLogout={logout}
         onLoginClick={() => setAuthOpen(true)}
       />
       {main}
+
+      {dialog === 'share' && currentId != null && (
+        <ManageDialog treeId={currentId} onClose={() => setDialog(null)} />
+      )}
+      {dialog === 'history' && currentId != null && (
+        <VersionsDialog
+          treeId={currentId}
+          onClose={() => setDialog(null)}
+          onRestored={() => {
+            void session.reload();
+            void loadTrees(currentId);
+          }}
+        />
+      )}
+      {dialog === 'review' && currentId != null && session.tree && (
+        <ReviewDialog
+          treeId={currentId}
+          currentTree={session.tree}
+          onClose={() => setDialog(null)}
+          onAccepted={() => {
+            void session.reload();
+            void loadTrees(currentId);
+          }}
+        />
+      )}
+
+      {joinToken && status === 'authed' && (
+        <JoinBanner
+          token={joinToken}
+          onDone={(treeId) => void afterJoin(treeId)}
+          onDismiss={() => {
+            setJoinToken(null);
+            window.history.replaceState(null, '', window.location.pathname);
+          }}
+        />
+      )}
+
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
     </>
   );

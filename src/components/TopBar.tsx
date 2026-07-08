@@ -1,27 +1,38 @@
-import type { TreeSummary } from '../lib/types';
+import type { TreeRole, TreeSummary } from '../lib/types';
 
 export function TopBar({
   email,
   trees,
   currentId,
+  currentRole,
+  pendingCount,
   onSelect,
   onNew,
   onRename,
   onDelete,
+  onShare,
+  onHistory,
+  onReview,
   onLogout,
   onLoginClick,
 }: {
   email: string | null;
   trees: TreeSummary[];
   currentId: number | null;
+  currentRole: TreeRole | null;
+  pendingCount: number;
   onSelect: (id: number) => void;
   onNew: () => void;
   onRename: () => void;
   onDelete: () => void;
+  onShare: () => void;
+  onHistory: () => void;
+  onReview: () => void;
   onLogout: () => void;
   onLoginClick: () => void;
 }) {
   const authed = !!email;
+  const isOwner = currentRole === 'owner';
 
   return (
     <div className="topbar">
@@ -43,7 +54,10 @@ export function TopBar({
             >
               {trees.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.title} ({t.people})
+                  {t.role === 'editor'
+                    ? `${t.title} · от ${t.ownerEmail ?? '—'}`
+                    : t.title}{' '}
+                  ({t.people})
                 </option>
               ))}
             </select>
@@ -51,17 +65,22 @@ export function TopBar({
           <button type="button" className="tbtn ghost" onClick={onNew} title="Создать новое древо">
             ＋ Новое
           </button>
-          {currentId != null && (
+          {isOwner && (
             <>
+              <button type="button" className="tbtn ghost" onClick={onReview} title="Предложения на проверке">
+                🖅 Предложения
+                {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
+              </button>
+              <button type="button" className="tbtn ghost" onClick={onShare} title="Совместный доступ">
+                👥 Доступ
+              </button>
+              <button type="button" className="tbtn ghost" onClick={onHistory} title="История изменений">
+                ⟲ История
+              </button>
               <button type="button" className="tbtn ghost" onClick={onRename} title="Переименовать древо">
                 ✎ Имя
               </button>
-              <button
-                type="button"
-                className="tbtn ghost danger-text"
-                onClick={onDelete}
-                title="Удалить это древо"
-              >
+              <button type="button" className="tbtn ghost danger-text" onClick={onDelete} title="Удалить это древо">
                 🗑
               </button>
             </>

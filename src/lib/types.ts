@@ -1,4 +1,6 @@
 export type Sex = 1 | 2;
+export type Relation = 'child' | 'spouse' | 'parent' | 'sibling';
+export type TreeRole = 'owner' | 'editor';
 
 /** One person. Children (`c`) and spouses (`sp`) reference other ids in the same tree. */
 export interface Person {
@@ -9,6 +11,8 @@ export interface Person {
   b?: string;
   d?: string;
   origin?: string;
+  /** Up to 5 photos, each a compressed image data URL. */
+  photos?: string[];
 }
 
 export type PeopleMap = Record<string, Person>;
@@ -28,6 +32,9 @@ export interface TreeSummary {
   id: number;
   title: string;
   people: number;
+  role: TreeRole;
+  ownerEmail?: string;
+  pendingCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -36,4 +43,36 @@ export interface User {
   id: number;
   email: string;
   createdAt?: string;
+}
+
+export interface Collaborator {
+  userId: number;
+  email: string;
+  role: string;
+  createdAt: string;
+}
+
+export interface Invite {
+  id: number;
+  token: string;
+  role: string;
+  createdAt: string;
+}
+
+export interface VersionSummary {
+  id: number;
+  title: string;
+  note: string | null;
+  people: number;
+  createdAt: string;
+  createdByEmail: string | null;
+}
+
+export interface PendingProposal {
+  id: number;
+  note: string | null;
+  people: number;
+  proposerEmail: string;
+  createdAt: string;
+  updatedAt: string;
 }

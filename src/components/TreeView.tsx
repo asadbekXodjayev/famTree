@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useMemo, useState } from 'react';
-import type { UseTree } from '../hooks/useTree';
+import type { TreeSession } from '../hooks/useTreeSession';
 import { exportTreePng } from '../lib/png';
 import {
   buildChain,
@@ -11,15 +11,13 @@ import {
   recomputeMatches,
   relLabel,
 } from '../lib/treeUtils';
-import type { Sex } from '../lib/types';
 import { BranchList, type RenderCtx } from './Branches';
-import { DetailModal } from './DetailModal';
+import { DetailModal, type ModalEditOps } from './DetailModal';
 import { Hero } from './Hero';
-import { EditActions, type EditOps } from './shared';
 import { Toolbar, type ImportedTree } from './Toolbar';
 
-export function TreeView({ t }: { t: UseTree }) {
-  const tree = t.tree!;
+export function TreeView({ session }: { session: TreeSession }) {
+  const tree = session.tree!;
   const p = tree.p;
   const root = tree.root;
 
@@ -28,7 +26,6 @@ export function TreeView({ t }: { t: UseTree }) {
   const [editMode, setEditMode] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
-  // Trim for matching/highlighting (reference behaviour) while the input keeps the raw value.
   const q = query.trim();
   const { matchIds, ancestorsOfMatch } = useMemo(() => recomputeMatches(p, q), [p, q]);
   const stats = useMemo(() => computeStats(p, root), [p, root]);
@@ -49,51 +46,32 @@ export function TreeView({ t }: { t: UseTree }) {
   const expandAll = () => setOpenSet(new Set(everyoneWithKids(p)));
   const collapseAll = () => setOpenSet(new Set());
 
-  const ops: EditOps | undefined = t.editable
+  const canEditNow = session.editable && editMode;
+
+  const ops: ModalEditOps | undefined = canEditNow
     ? {
-        addChild: (id) => {
-          const name = window.prompt('Имя нового ребёнка:');
-          if (!name || !name.trim()) return;
-          const sexAns = window.prompt('Пол — мужской: 1, женский: 2', '1');
-          const sex: Sex = sexAns && sexAns.trim() === '2' ? 2 : 1;
-          void t.addPerson(id, name.trim(), sex, false);
-          setOpenSet((prev) => new Set(prev).add(id));
-        },
-        addSpouse: (id) => {
-          const name = window.prompt('Имя супруга/супруги:');
-          if (!name || !name.trim()) return;
-          const sex: Sex = p[id].s === 1 ? 2 : 1;
-          void t.addPerson(id, name.trim(), sex, true);
-        },
-        rename: (id) => {
-          const name = window.prompt('Имя:', p[id].n);
-          if (name && name.trim()) void t.renamePerson(id, name.trim());
-        },
-        dates: (id) => {
-          const b = window.prompt(
-            'Год рождения (напр. 12.05.1970 или 1970). Пусто — удалить:',
-            p[id].b || '',
-          );
-          if (b === null) return;
-          const d = window.prompt('Дата смерти (пусто — при жизни):', p[id].d || '');
-          if (d === null) return;
-          void t.editDates(id, b.trim(), d.trim());
-        },
+        rename: session.renamePerson,
+        setSex: session.setSex,
+        setDates: session.setDates,
+        setOrigin: session.setOrigin,
+        addRelative: session.addRelative,
         remove: (id) => {
+          const cnt = descCount(p, id, new Set());
           if (id === root) {
             alert('Родоначальника нельзя удалить.');
             return;
           }
-          const cnt = descCount(p, id, new Set());
           if (
             !window.confirm(
               '«' + p[id].n + '» и его потомков (' + cnt + ') удалить? Это действие необратимо.',
             )
           )
             return;
-          void t.deletePerson(id);
+          session.deletePerson(id);
           if (selected === id) setSelected(null);
         },
+        addPhotos: (id, files) => void session.addPhotoFiles(id, files),
+        removePhoto: session.removePhoto,
       }
     : undefined;
 
@@ -105,7 +83,6 @@ export function TreeView({ t }: { t: UseTree }) {
     openSet,
     toggle,
     openDetail,
-    ops,
   };
 
   const exportJson = () => {
@@ -118,13 +95,23 @@ export function TreeView({ t }: { t: UseTree }) {
     a.download = 'shajara.json';
     a.click();
     URL.revokeObjectURL(url);
-    t.flash('⭳ Экспортировано');
+    session.flash('⭳ Экспортировано');
   };
 
   const importData = (data: ImportedTree) => {
-    void t.replaceTree({ root: data.root, p: data.p });
+    session.replaceWorking({ root: data.root, p: data.p });
     setOpenSet(new Set());
     setSelected(null);
+  };
+
+  const submitProposal = async () => {
+    const note = window.prompt('Комментарий для владельца (необязательно):', '');
+    if (note === null) return;
+    try {
+      await session.submitProposal(note.trim() || undefined);
+    } catch (e) {
+      alert('Не удалось отправить: ' + (e as Error).message);
+    }
   };
 
   // spouse pills belong to the deepest chain member that has any
@@ -143,9 +130,9 @@ export function TreeView({ t }: { t: UseTree }) {
     : 'У ' + p[lastChainId].n + ' пока нет добавленных детей';
 
   return (
-    <div className={editMode ? 'edit-on' : undefined}>
+    <div>
       <Toolbar
-        editable={t.editable}
+        editable={session.editable}
         editMode={editMode}
         setEditMode={setEditMode}
         onExpand={expandAll}
@@ -153,9 +140,28 @@ export function TreeView({ t }: { t: UseTree }) {
         onPng={() => exportTreePng(p, root)}
         onExportJson={exportJson}
         onImportData={importData}
-        onRefresh={() => void t.reload()}
-        saveMsg={t.saveMsg}
+        onRefresh={() => void session.reload()}
+        saveMsg={session.saveMsg}
       />
+
+      {session.mode === 'proposal' && (
+        <div className="propose-bar">
+          <span className="propose-note">
+            ✎ Вы предлагаете изменения. Владелец увидит их после отправки.
+            {session.dirty && <b> Есть несохранённые правки.</b>}
+          </span>
+          <div className="propose-actions">
+            {session.dirty && (
+              <button type="button" className="tbtn ghost" onClick={() => void session.discardProposal()}>
+                Отменить правки
+              </button>
+            )}
+            <button type="button" className="tbtn primary" onClick={() => void submitProposal()}>
+              ⤴ Отправить на проверку
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="wrap">
         <Hero
@@ -184,10 +190,7 @@ export function TreeView({ t }: { t: UseTree }) {
                   className={'chain-box' + (i === 0 ? ' root' : '')}
                   tabIndex={0}
                   role="button"
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest('.chain-edit')) return;
-                    openDetail(id);
-                  }}
+                  onClick={() => openDetail(id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') openDetail(id);
                   }}
@@ -195,11 +198,6 @@ export function TreeView({ t }: { t: UseTree }) {
                   <div className="chain-name">{p[id].n}</div>
                   <div className="chain-role">{relLabel(i, p[id].s === 2)}</div>
                   {ls && <div className="chain-dates">{ls}</div>}
-                  {ops && (
-                    <div className="chain-edit">
-                      <EditActions id={id} ops={ops} noDelete={i === 0} />
-                    </div>
-                  )}
                 </div>
               </Fragment>
             );
@@ -266,7 +264,7 @@ export function TreeView({ t }: { t: UseTree }) {
         <p className="footer-note">
           Шажара — интерактивное семейное древо.
           <br />
-          Нажмите на любое имя, чтобы увидеть родственные связи.
+          Нажмите на любое имя, чтобы открыть карточку и, в режиме правки, редактировать.
         </p>
       </div>
 
@@ -275,6 +273,9 @@ export function TreeView({ t }: { t: UseTree }) {
           p={p}
           root={root}
           id={selected}
+          editable={canEditNow}
+          photoBusy={session.photoBusy}
+          ops={ops}
           onClose={() => setSelected(null)}
           onGoto={(id) => setSelected(id)}
         />

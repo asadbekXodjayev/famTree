@@ -1,4 +1,16 @@
-import type { PeopleMap, Sex, Tree, TreeSummary, User } from './types';
+import type {
+  Collaborator,
+  Invite,
+  PeopleMap,
+  PendingProposal,
+  Relation,
+  Sex,
+  Tree,
+  TreeRole,
+  TreeSummary,
+  User,
+  VersionSummary,
+} from './types';
 
 const BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 const TOKEN_KEY = 'shajara_token';
@@ -78,7 +90,7 @@ export const api = {
 
   // ---- trees ----
   listTrees: () => request<{ trees: TreeSummary[] }>('/trees'),
-  getTree: (id: number) => request<{ tree: Tree }>(`/trees/${id}`),
+  getTree: (id: number) => request<{ tree: Tree; role?: TreeRole }>(`/trees/${id}`),
   createTree: (title?: string, data?: { root: string; p: PeopleMap }) =>
     request<{ tree: Tree }>('/trees', { method: 'POST', body: JSON.stringify({ title, data }) }),
   renameTree: (id: number, title: string) =>
@@ -88,10 +100,10 @@ export const api = {
   deleteTree: (id: number) => request<void>(`/trees/${id}`, { method: 'DELETE' }),
 
   // ---- persons ----
-  addPerson: (treeId: number, anchorId: string, name: string, sex: Sex, asSpouse = false) =>
+  addRelative: (treeId: number, anchorId: string, relation: Relation, name: string, sex: Sex) =>
     request<{ personId: string; tree: Tree }>(`/trees/${treeId}/persons`, {
       method: 'POST',
-      body: JSON.stringify({ anchorId, name, sex, asSpouse }),
+      body: JSON.stringify({ anchorId, name, sex, relation }),
     }),
   updatePerson: (
     treeId: number,
@@ -104,4 +116,66 @@ export const api = {
     }),
   deletePerson: (treeId: number, pid: string) =>
     request<{ removed: number; tree: Tree }>(`/trees/${treeId}/persons/${pid}`, { method: 'DELETE' }),
+
+  // ---- photos ----
+  addPhoto: (treeId: number, pid: string, dataUrl: string) =>
+    request<{ tree: Tree }>(`/trees/${treeId}/persons/${pid}/photos`, {
+      method: 'POST',
+      body: JSON.stringify({ dataUrl }),
+    }),
+  removePhoto: (treeId: number, pid: string, index: number) =>
+    request<{ tree: Tree }>(`/trees/${treeId}/persons/${pid}/photos/${index}`, { method: 'DELETE' }),
+
+  // ---- collaborators & invites ----
+  listCollaborators: (treeId: number) =>
+    request<{ collaborators: Collaborator[] }>(`/trees/${treeId}/collaborators`),
+  removeCollaborator: (treeId: number, userId: number) =>
+    request<void>(`/trees/${treeId}/collaborators/${userId}`, { method: 'DELETE' }),
+  createInvite: (treeId: number) =>
+    request<{ token: string }>(`/trees/${treeId}/invites`, { method: 'POST' }),
+  listInvites: (treeId: number) => request<{ invites: Invite[] }>(`/trees/${treeId}/invites`),
+  revokeInvite: (treeId: number, inviteId: number) =>
+    request<void>(`/trees/${treeId}/invites/${inviteId}`, { method: 'DELETE' }),
+  previewInvite: (token: string) =>
+    request<{ treeId: number; title: string; ownerEmail: string }>(`/invites/${token}`),
+  acceptInvite: (token: string) =>
+    request<{ treeId: number }>(`/invites/${token}/accept`, { method: 'POST' }),
+
+  // ---- versions ----
+  listVersions: (treeId: number) =>
+    request<{ versions: VersionSummary[] }>(`/trees/${treeId}/versions`),
+  getVersion: (treeId: number, vid: number) =>
+    request<{ tree: Tree }>(`/trees/${treeId}/versions/${vid}`),
+  restoreVersion: (treeId: number, vid: number) =>
+    request<{ tree: Tree }>(`/trees/${treeId}/versions/${vid}/restore`, { method: 'POST' }),
+  checkpoint: (treeId: number, note?: string) =>
+    request<{ versions: VersionSummary[] }>(`/trees/${treeId}/versions`, {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    }),
+
+  // ---- proposals ----
+  getDraft: (treeId: number) =>
+    request<{ proposal: { id: number; status: string; data: Tree; note: string | null } | null }>(
+      `/trees/${treeId}/proposals/draft`,
+    ),
+  saveDraft: (treeId: number, data: { root: string; p: PeopleMap }) =>
+    request<{ ok: true }>(`/trees/${treeId}/proposals/draft`, {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
+    }),
+  submitProposal: (treeId: number, data: { root: string; p: PeopleMap }, note?: string) =>
+    request<{ proposalId: number }>(`/trees/${treeId}/proposals`, {
+      method: 'POST',
+      body: JSON.stringify({ data, note }),
+    }),
+  listProposals: (treeId: number) =>
+    request<{ proposals: PendingProposal[] }>(`/trees/${treeId}/proposals`),
+  getProposal: (pid: number) =>
+    request<{
+      proposal: { id: number; treeId: number; status: string; note: string | null; data: Tree };
+    }>(`/proposals/${pid}`),
+  acceptProposal: (pid: number) =>
+    request<{ tree: Tree }>(`/proposals/${pid}/accept`, { method: 'POST' }),
+  rejectProposal: (pid: number) => request<void>(`/proposals/${pid}/reject`, { method: 'POST' }),
 };

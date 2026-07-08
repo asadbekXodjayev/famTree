@@ -456,6 +456,124 @@ h1{
 .rel-chip .yr{ color:#8a7350; font-size:11.5px; font-family:var(--sans); font-weight:400; font-style:italic; }
 .rel-empty{ color:#8a7350; font-size:13.5px; font-style:italic; }
 
+/* ---------- Photos — printed-album frames ---------- */
+.photo-block{ margin-top:18px; }
+.photo-strip{ display:flex; gap:12px; flex-wrap:wrap; margin-top:4px; }
+.photo{
+  position:relative; width:96px; padding:5px 5px 15px; border-radius:4px;
+  background:#fbf6ea; border:1px solid #cbb487;
+  box-shadow:0 2px 6px rgba(45,28,10,.3), inset 0 1px 0 rgba(255,255,255,.7);
+}
+.photo img{
+  width:100%; height:78px; object-fit:cover; border-radius:2px; display:block; cursor:zoom-in;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.1);
+}
+.photo-remove{
+  position:absolute; top:-8px; right:-8px; width:22px; height:22px; border-radius:50%;
+  border:1px solid #8a3a28; background:linear-gradient(180deg,#b5503a,#8a3020); color:#fff;
+  font-size:11px; cursor:pointer; display:none; align-items:center; justify-content:center;
+  box-shadow:0 1px 3px rgba(0,0,0,.4);
+}
+.photo:hover .photo-remove, .photo:focus-within .photo-remove{ display:flex; }
+.photo-add{
+  width:96px; min-height:100px; border-radius:6px; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+  background:linear-gradient(180deg,#efe1bf,#e3d0a4); color:#6d5320;
+  border:1.5px dashed #b0925c; font-family:var(--sans);
+  box-shadow:inset 0 1px 0 rgba(255,250,235,.7);
+}
+.photo-add:hover{ background:linear-gradient(180deg,#f6ead0,#e8d7ad); }
+.photo-add:disabled{ opacity:.6; cursor:default; }
+.photo-add-plus{ font-size:22px; line-height:1; }
+.photo-add-lbl{ font-size:11px; letter-spacing:.04em; }
+
+.lightbox{
+  position:fixed; inset:0; z-index:120; padding:24px; cursor:zoom-out;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(20,12,6,.86); animation:pop .18s ease;
+}
+.lightbox img{
+  max-width:92vw; max-height:88vh; border-radius:4px;
+  border:6px solid #fbf6ea; box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+
+/* ---------- Proposal banner ---------- */
+.propose-bar{
+  display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  max-width:1000px; margin:12px auto 0; padding:11px 16px; border-radius:12px;
+  background:linear-gradient(180deg,#efe1bd,#e3d1a4); border:1px solid #C0A268;
+  box-shadow:inset 0 1px 0 rgba(255,250,235,.8), 0 2px 5px rgba(60,40,15,.18);
+}
+.propose-note{ font-size:13px; color:#6d5320; font-style:italic; }
+.propose-note b{ font-style:normal; color:#8a3020; }
+.propose-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+
+/* ---------- Modal edit panel ---------- */
+.edit-panel{
+  margin-top:16px; padding:16px; border-radius:12px;
+  background:linear-gradient(180deg,#f3e8cd,#ece0bf); border:1px solid #cbb487;
+  box-shadow:inset 0 1px 0 rgba(255,250,235,.7);
+}
+.ef-row{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.ef-row > span{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#8a7350; min-width:96px; flex-shrink:0; }
+.ef-row input{
+  flex:1; min-width:0; font-family:var(--sans); font-size:14px; color:var(--ink);
+  padding:8px 11px; border-radius:9px; background:#fbf6ea; border:1px solid #b0925c;
+  box-shadow:inset 0 1px 3px rgba(90,60,25,.2);
+}
+.ef-row input:focus{ outline:none; border-color:var(--accent); box-shadow:inset 0 1px 3px rgba(90,60,25,.2), 0 0 0 3px rgba(198,162,78,.3); }
+.ef-two{ display:flex; gap:10px; }
+.ef-two .ef-row{ flex:1; margin-bottom:10px; }
+.ef-two .ef-row > span{ min-width:0; }
+.seg{ display:inline-flex; border-radius:9px; overflow:hidden; border:1px solid #b0925c; }
+.seg button{
+  font-family:var(--sans); font-size:13px; padding:7px 13px; cursor:pointer; border:none;
+  background:#efe1be; color:#6d5320; border-right:1px solid #cbb487;
+}
+.seg button:last-child{ border-right:none; }
+.seg button.on{ background:linear-gradient(180deg,var(--gold-hi),#BE9448); color:#3a2a10; font-weight:700; }
+.seg.small button{ padding:6px 12px; font-size:14px; }
+.add-rel-btns{ display:flex; flex-wrap:wrap; gap:7px; }
+.add-rel-form{ display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+.add-rel-form input{
+  flex:1; min-width:130px; font-family:var(--sans); font-size:14px; padding:8px 11px; border-radius:9px;
+  background:#fbf6ea; border:1px solid #b0925c; box-shadow:inset 0 1px 3px rgba(90,60,25,.2);
+}
+.del-btn{ margin-top:16px; }
+
+/* ---------- Badge ---------- */
+.badge{
+  display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px;
+  padding:0 5px; margin-left:5px; border-radius:999px; font-size:11px; font-weight:700;
+  background:#8a3020; color:#f4e4c6;
+}
+
+/* ---------- Dialogs ---------- */
+.modal.dlg{ max-width:540px; }
+.dlg-list{ display:flex; flex-direction:column; gap:8px; }
+.dlg-row{
+  display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
+  background:#f3e8cd; border:1px solid #cbb487;
+}
+.dlg-row > span:first-child{ flex:1; min-width:0; overflow-wrap:anywhere; }
+.invite-row input{
+  flex:1; min-width:0; font-size:12px; font-family:var(--sans); color:var(--ink-soft);
+  padding:6px 9px; border-radius:8px; background:#fbf6ea; border:1px solid #b0925c;
+}
+.version-row{ align-items:center; }
+.version-info{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.version-info b{ font-family:var(--serif); font-size:15px; }
+.version-meta{ font-size:11.5px; color:#8a7350; font-style:italic; }
+.proposal-item{ display:flex; flex-direction:column; }
+.proposal-detail{ padding:12px; margin-top:6px; border-radius:10px; background:#efe4c6; border:1px solid #cbb487; }
+.diff-summary{ display:flex; gap:14px; flex-wrap:wrap; font-size:13px; font-weight:700; margin-bottom:8px; }
+.diff.added{ color:#4a6b34; }
+.diff.changed{ color:#8a6a2a; }
+.diff.removed{ color:#8a3020; }
+.diff-names{ font-size:12.5px; color:var(--ink-soft); margin-bottom:6px; overflow-wrap:anywhere; }
+.proposal-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.dlg-hint{ font-size:12px; color:#8a7350; font-style:italic; line-height:1.6; margin-top:14px; }
+
 /* ---------- Auth ---------- */
 .auth-modal{ max-width:404px; }
 .auth-form{ display:flex; flex-direction:column; gap:15px; }

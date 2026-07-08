@@ -1,6 +1,6 @@
 import { descCount, lifeSpan, relLabel } from '../lib/treeUtils';
 import type { PeopleMap } from '../lib/types';
-import { EditActions, Highlighted, SexDot, type EditOps } from './shared';
+import { Highlighted, SexDot } from './shared';
 
 export interface RenderCtx {
   p: PeopleMap;
@@ -10,7 +10,6 @@ export interface RenderCtx {
   openSet: Set<string>;
   toggle: (id: string) => void;
   openDetail: (id: string) => void;
-  ops?: EditOps;
 }
 
 function SubItem({
@@ -24,7 +23,7 @@ function SubItem({
   seen: Set<string>;
   ctx: RenderCtx;
 }) {
-  const { p, query, matchIds, ancestors, openSet, toggle, openDetail, ops } = ctx;
+  const { p, query, matchIds, ancestors, openSet, toggle, openDetail } = ctx;
   const person = p[id];
   if (!person) return null;
 
@@ -74,7 +73,6 @@ function SubItem({
         <span className="sub-meta">
           {'· ' + relLabel(gen, person.s === 2) + (kids.length ? ' · потомков: ' + count : '')}
         </span>
-        <EditActions id={id} ops={ops} />
       </div>
       <div className="sub-children">
         {kids.map((cid) => (
@@ -86,7 +84,7 @@ function SubItem({
 }
 
 function BranchCard({ id, idx, gen, ctx }: { id: string; idx: number; gen: number; ctx: RenderCtx }) {
-  const { p, query, matchIds, ancestors, openSet, toggle, openDetail, ops } = ctx;
+  const { p, query, matchIds, ancestors, openSet, toggle, openDetail } = ctx;
   const person = p[id];
   const kids = (person.c || []).filter((c) => p[c]);
   const open =
@@ -134,7 +132,6 @@ function BranchCard({ id, idx, gen, ctx }: { id: string; idx: number; gen: numbe
             {relLabel(gen, person.s === 2) + (count ? ' · потомков: ' + count : '')}
           </div>
         </div>
-        <EditActions id={id} ops={ops} />
         <div className="branch-chevron">›</div>
       </div>
       <div className="branch-body">
