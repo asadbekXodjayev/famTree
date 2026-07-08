@@ -11,7 +11,7 @@ function Splash({ text }: { text?: string }) {
   return (
     <div className="splash">
       <div className="splash-mark" aria-hidden="true">
-        ۞
+        ⌂
       </div>
       <div className="splash-text">{text || 'Загрузка…'}</div>
     </div>
