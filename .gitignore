@@ -11,6 +11,12 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+
+# Backend (deployed separately to the VM) and source archives that hold the
+# real family data — kept OUT of this public frontend repo.
+/server/
+/shajara/
 
 # Editor directories and files
 .vscode/*
