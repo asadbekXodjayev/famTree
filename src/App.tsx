@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { AuthModal } from './components/AuthModal';
 import { JoinBanner, ManageDialog, ReviewDialog, VersionsDialog } from './components/dialogs';
+import { SharedView } from './components/SharedView';
 import { TopBar } from './components/TopBar';
 import { TreeView } from './components/TreeView';
 import { useTreeSession, type TreeSource } from './hooks/useTreeSession';
@@ -31,6 +32,28 @@ function ErrorBox({ message, onRetry }: { message: string; onRetry: () => void }
 }
 
 type Dialog = 'share' | 'history' | 'review' | null;
+
+/**
+ * A tree opened through a share link. Runs entirely outside the signed-in
+ * workspace: the token is the authorization, so there is no tree list, no
+ * account, and no owner-only controls to render.
+ */
+function SharedWorkspace({ token }: { token: string }) {
+  const session = useTreeSession(useMemo(() => ({ kind: 'share', token }) as const, [token]));
+
+  if (session.loading) return <Splash text="Открываем древо…" />;
+  if (session.error || !session.tree) {
+    return (
+      <div className="error-box">
+        <p>{session.error || 'Ссылка недействительна, отозвана или истекла.'}</p>
+        <a className="tbtn primary" href={window.location.pathname}>
+          На главную
+        </a>
+      </div>
+    );
+  }
+  return <SharedView session={session} />;
+}
 
 function Workspace() {
   const { user, status, logout } = useAuth();
@@ -192,7 +215,9 @@ function Workspace() {
           treeId={currentId}
           onClose={() => setDialog(null)}
           onRestored={() => {
-            void session.reload();
+            // Discard queued writes: a save debounced from the pre-restore
+            // document would otherwise land after the rollback and undo it.
+            void session.reload(true);
             void loadTrees(currentId);
           }}
         />
@@ -203,7 +228,8 @@ function Workspace() {
           currentTree={session.tree}
           onClose={() => setDialog(null)}
           onAccepted={() => {
-            void session.reload();
+            // Same reasoning as onRestored — the server document just changed.
+            void session.reload(true);
             void loadTrees(currentId);
           }}
         />
@@ -226,6 +252,11 @@ function Workspace() {
 }
 
 export default function App() {
+  // A share link is self-contained: it must work for someone with no account,
+  // and must not be hijacked by whatever tree the visitor happens to have open.
+  const shareToken = new URLSearchParams(window.location.search).get('share');
+  if (shareToken) return <SharedWorkspace token={shareToken} />;
+
   return (
     <AuthProvider>
       <Workspace />

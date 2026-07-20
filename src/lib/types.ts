@@ -73,6 +73,28 @@ export interface VersionSummary {
   createdByEmail: string | null;
 }
 
+/** A share link grants either read-only viewing or direct editing, without an account. */
+export type ShareRole = 'view' | 'edit';
+
+export interface ShareLink {
+  id: number;
+  token: string;
+  role: ShareRole;
+  label: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+/** One save made through an edit link, attributed to the name the guest gave. */
+export interface ShareActivity {
+  id: number;
+  guestName: string;
+  peopleBefore: number;
+  peopleAfter: number;
+  createdAt: string;
+  label: string | null;
+}
+
 export interface PendingProposal {
   id: number;
   note: string | null;

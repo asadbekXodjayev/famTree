@@ -5,6 +5,9 @@ import type {
   PendingProposal,
   Relation,
   Sex,
+  ShareActivity,
+  ShareLink,
+  ShareRole,
   Tree,
   TreeRole,
   TreeSummary,
@@ -35,7 +38,11 @@ export class ApiError extends Error {
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const token = getToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  // Share routes are public and ignore Authorization. Don't send the account
+  // JWT there at all — a signed-in owner opening their own share link should
+  // not put their session token on a request that has no use for it.
+  const isPublicShare = path.startsWith('/share/');
+  if (token && !isPublicShare) headers.set('Authorization', `Bearer ${token}`);
   if (options.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
@@ -140,6 +147,32 @@ export const api = {
     request<{ treeId: number; title: string; ownerEmail: string }>(`/invites/${token}`),
   acceptInvite: (token: string) =>
     request<{ treeId: number }>(`/invites/${token}/accept`, { method: 'POST' }),
+
+  // ---- share links ----
+  createShare: (treeId: number, role: ShareRole, label?: string) =>
+    request<{ share: ShareLink }>(`/trees/${treeId}/shares`, {
+      method: 'POST',
+      body: JSON.stringify({ role, label }),
+    }),
+  listShares: (treeId: number) => request<{ shares: ShareLink[] }>(`/trees/${treeId}/shares`),
+  revokeShare: (treeId: number, shareId: number) =>
+    request<void>(`/trees/${treeId}/shares/${shareId}`, { method: 'DELETE' }),
+  listActivity: (treeId: number) =>
+    request<{ activity: ShareActivity[] }>(`/trees/${treeId}/activity`),
+
+  // Opened via a share token — no auth, the token is the authorization.
+  getShared: (token: string) =>
+    request<{ role: ShareRole; rev: number; tree: Tree }>(`/share/${encodeURIComponent(token)}`),
+  saveShared: (
+    token: string,
+    data: { root: string; p: PeopleMap },
+    guestName: string,
+    baseRev?: number,
+  ) =>
+    request<{ tree: Tree; rev: number }>(`/share/${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ data, guestName, baseRev }),
+    }),
 
   // ---- versions ----
   listVersions: (treeId: number) =>

@@ -9,6 +9,7 @@ export interface ImportedTree {
 
 export function Toolbar({
   editable,
+  allowImport = true,
   editMode,
   setEditMode,
   onExpand,
@@ -20,6 +21,11 @@ export function Toolbar({
   saveMsg,
 }: {
   editable: boolean;
+  /**
+   * JSON import replaces the ENTIRE document. Share-link guests may edit people
+   * but must not be able to overwrite the whole tree in one click.
+   */
+  allowImport?: boolean;
   editMode: boolean;
   setEditMode: (v: boolean) => void;
   onExpand: () => void;
@@ -80,7 +86,7 @@ export function Toolbar({
       <button type="button" className="tbtn ghost" onClick={onExportJson}>
         ⭳ JSON
       </button>
-      {editable && (
+      {editable && allowImport && (
         <button type="button" className="tbtn ghost" onClick={() => fileRef.current?.click()}>
           ⭱ Импорт
         </button>

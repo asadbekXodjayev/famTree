@@ -133,6 +133,7 @@ export function TreeView({ session }: { session: TreeSession }) {
     <div>
       <Toolbar
         editable={session.editable}
+        allowImport={session.mode !== 'guest'}
         editMode={editMode}
         setEditMode={setEditMode}
         onExpand={expandAll}

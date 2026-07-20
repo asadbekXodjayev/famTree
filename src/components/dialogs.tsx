@@ -5,12 +5,18 @@ import type {
   Collaborator,
   Invite,
   PendingProposal,
+  ShareActivity,
+  ShareLink,
+  ShareRole,
   Tree,
   VersionSummary,
 } from '../lib/types';
 
 function inviteUrl(token: string): string {
   return `${window.location.origin}/?invite=${token}`;
+}
+function shareUrl(token: string): string {
+  return `${window.location.origin}/?share=${token}`;
 }
 
 function Shell({ title, subtitle, onClose, children }: {
@@ -54,17 +60,53 @@ function Shell({ title, subtitle, onClose, children }: {
 export function ManageDialog({ treeId, onClose }: { treeId: number; onClose: () => void }) {
   const [collabs, setCollabs] = useState<Collaborator[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
+  const [shares, setShares] = useState<ShareLink[]>([]);
+  const [activity, setActivity] = useState<ShareActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [c, i] = await Promise.all([api.listCollaborators(treeId), api.listInvites(treeId)]);
+      const [c, i, s, a] = await Promise.all([
+        api.listCollaborators(treeId),
+        api.listInvites(treeId),
+        api.listShares(treeId),
+        api.listActivity(treeId),
+      ]);
       setCollabs(c.collaborators);
       setInvites(i.invites);
+      setShares(s.shares);
+      setActivity(a.activity);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createShare = async (role: ShareRole) => {
+    try {
+      await api.createShare(treeId, role);
+      await load();
+    } catch (e) {
+      alert('Не удалось создать ссылку: ' + (e as Error).message);
+    }
+  };
+  const revokeShareLink = async (id: number, role: ShareRole) => {
+    const msg =
+      role === 'edit'
+        ? 'Отозвать эту ссылку? Все, у кого она есть, потеряют доступ к редактированию.'
+        : 'Отозвать эту ссылку для просмотра?';
+    if (!window.confirm(msg)) return;
+    await api.revokeShare(treeId, id);
+    await load();
+  };
+  const copyShare = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(shareUrl(token));
+      setCopied(token);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      /* clipboard blocked — the field is selectable as a fallback */
     }
   };
   useEffect(() => {
@@ -95,9 +137,78 @@ export function ManageDialog({ treeId, onClose }: { treeId: number; onClose: () 
     await load();
   };
 
+  const viewLinks = shares.filter((s) => s.role === 'view');
+  const editLinks = shares.filter((s) => s.role === 'edit');
+
+  const linkRow = (s: ShareLink) => (
+    <div className="dlg-row invite-row" key={s.id}>
+      <input readOnly value={shareUrl(s.token)} onFocus={(e) => e.target.select()} />
+      <button className="tbtn ghost" onClick={() => void copyShare(s.token)}>
+        {copied === s.token ? '✓' : 'Копир.'}
+      </button>
+      <button
+        className="tbtn ghost danger-text"
+        title="Отозвать ссылку"
+        aria-label="Отозвать ссылку"
+        onClick={() => void revokeShareLink(s.id, s.role)}
+      >
+        ✕
+      </button>
+    </div>
+  );
+
   return (
-    <Shell title="Совместный доступ" subtitle="Пригласите родственников как редакторов" onClose={onClose}>
-      <div className="rel-label">Редакторы ({collabs.length})</div>
+    <Shell
+      title="Поделиться древом"
+      subtitle="Ссылки работают без регистрации — просто отправьте их родственникам"
+      onClose={onClose}
+    >
+      <div className="rel-label">🔗 Ссылка для просмотра ({viewLinks.length})</div>
+      <button type="button" className="tbtn" onClick={() => void createShare('view')}>
+        ＋ Создать ссылку для просмотра
+      </button>
+      <div className="dlg-list" style={{ marginTop: 10 }}>{viewLinks.map(linkRow)}</div>
+      <p className="dlg-hint">Открывший увидит древо, но ничего не сможет изменить.</p>
+
+      <div className="rel-label" style={{ marginTop: 18 }}>
+        ✎ Ссылка для редактирования ({editLinks.length})
+      </div>
+      <button type="button" className="tbtn primary" onClick={() => void createShare('edit')}>
+        ＋ Создать ссылку для редактирования
+      </button>
+      <div className="dlg-list" style={{ marginTop: 10 }}>{editLinks.map(linkRow)}</div>
+      <p className="dlg-hint">
+        <b>Отправляйте только тем, кому доверяете.</b> Любой, у кого есть эта ссылка, сможет менять
+        древо без регистрации — он лишь укажет своё имя. Все правки видны ниже, а откатить их можно
+        в разделе «История».
+      </p>
+
+      {activity.length > 0 && (
+        <>
+          <div className="rel-label" style={{ marginTop: 18 }}>
+            Правки по ссылке
+          </div>
+          <div className="dlg-list">
+            {activity.slice(0, 12).map((a) => {
+              const delta = a.peopleAfter - a.peopleBefore;
+              const change =
+                delta > 0 ? `+${delta} чел.` : delta < 0 ? `${delta} чел.` : 'правки без новых людей';
+              return (
+                <div className="dlg-row" key={a.id}>
+                  <span>
+                    <b>{a.guestName}</b> · {change}
+                  </span>
+                  <span className="dlg-when">{new Date(a.createdAt + 'Z').toLocaleString('ru')}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <div className="rel-label" style={{ marginTop: 22 }}>
+        Редакторы с аккаунтом ({collabs.length})
+      </div>
       {loading ? (
         <div className="rel-empty">Загрузка…</div>
       ) : collabs.length ? (

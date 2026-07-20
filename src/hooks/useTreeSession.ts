@@ -20,8 +20,30 @@ function isRetryable(e: unknown): boolean {
   return e.status === 0 || e.status === 429 || e.status >= 500;
 }
 
-export type TreeSource = { kind: 'demo' } | { kind: 'tree'; id: number };
-export type SessionMode = 'view' | 'owner' | 'proposal';
+export type TreeSource =
+  | { kind: 'demo' }
+  | { kind: 'tree'; id: number }
+  /** Opened through a share link; the token is the whole authorization. */
+  | { kind: 'share'; token: string };
+/** `guest` = editing through a share link, with no account. */
+export type SessionMode = 'view' | 'owner' | 'proposal' | 'guest';
+
+const GUEST_NAME_KEY = 'shajara_guest_name';
+
+export function getGuestName(): string {
+  try {
+    return localStorage.getItem(GUEST_NAME_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+export function setGuestName(name: string): void {
+  try {
+    localStorage.setItem(GUEST_NAME_KEY, name.trim().slice(0, 60));
+  } catch {
+    /* private mode — the name just won't persist between visits */
+  }
+}
 
 function errMsg(e: unknown): string {
   if (e instanceof ApiError) return e.message;
@@ -45,6 +67,9 @@ export interface TreeSession {
   reload: (discardPending?: boolean) => Promise<void>;
   /** True while a write is queued or being retried. */
   hasPendingSave: boolean;
+  /** Share-link guest's display name ('' until they give one). */
+  guestName: string;
+  setGuestName: (name: string) => void;
   flash: (m: string) => void;
   addRelative: (anchorId: string, relation: Relation, name: string, sex: Sex) => void;
   renamePerson: (id: string, name: string) => void;
@@ -72,16 +97,25 @@ export function useTreeSession(source: TreeSource | null): TreeSession {
   /** Last save error, sticky until a save succeeds — unlike the 1.8s flash toast. */
   const [saveError, setSaveError] = useState<string | null>(null);
   const [hasPendingSave, setHasPendingSave] = useState(false);
+  /** Display name for share-link guests; persisted so they aren't asked twice. */
+  const [guestName, setGuestNameState] = useState(() => getGuestName());
 
   const baseRef = useRef<WorkingTree | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retries = useRef(0);
-  // The pending save carries its OWN target (tree id + mode) so a switch/mode-change
-  // never routes a queued write to the wrong tree or endpoint.
-  const pending = useRef<{ id: number; mode: SessionMode; data: { root: string; p: Tree['p'] } } | null>(
-    null,
-  );
+  /** Server revision this client's document is based on (share sessions). */
+  const revRef = useRef<number | null>(null);
+  // The pending save carries its OWN target (tree id or share token, plus mode)
+  // so a switch/mode-change never routes a queued write to the wrong tree or endpoint.
+  type PendingSave = {
+    mode: SessionMode;
+    data: { root: string; p: Tree['p'] };
+    id?: number;
+    token?: string;
+    guestName?: string;
+  };
+  const pending = useRef<PendingSave | null>(null);
 
   const flash = useCallback((msg: string) => {
     setSaveMsg(msg);
@@ -89,7 +123,13 @@ export function useTreeSession(source: TreeSource | null): TreeSession {
     flashTimer.current = setTimeout(() => setSaveMsg(''), 1800);
   }, []);
 
-  const key = source ? (source.kind === 'demo' ? 'demo' : `tree:${source.id}`) : 'none';
+  const key = !source
+    ? 'none'
+    : source.kind === 'demo'
+      ? 'demo'
+      : source.kind === 'share'
+        ? `share:${source.token}`
+        : `tree:${source.id}`;
 
   const reload = useCallback(async (discardPending = false) => {
     if (!source) {
@@ -122,6 +162,15 @@ export function useTreeSession(source: TreeSource | null): TreeSession {
         baseRef.current = null;
         setRole(null);
         setMode('view');
+        setTree(tree);
+      } else if (source.kind === 'share') {
+        const { role: shareRole, rev, tree } = await api.getShared(source.token);
+        revRef.current = rev;
+        baseRef.current = null;
+        setRole(null);
+        // An edit link only becomes editable once the guest has said who they
+        // are — every save must carry attribution.
+        setMode(shareRole === 'edit' ? 'guest' : 'view');
         setTree(tree);
       } else {
         const { tree: canon, role: r } = await api.getTree(source.id);
@@ -161,18 +210,36 @@ export function useTreeSession(source: TreeSource | null): TreeSession {
     setHasPendingSave(false);
     if (!t) return;
     try {
-      if (t.mode === 'owner') {
+      if (t.mode === 'owner' && t.id != null) {
         await api.replaceTree(t.id, t.data);
         flash('✓ Сохранено');
-      } else if (t.mode === 'proposal') {
+      } else if (t.mode === 'proposal' && t.id != null) {
         await api.saveDraft(t.id, t.data);
         flash('✓ Черновик сохранён');
+      } else if (t.mode === 'guest' && t.token && t.guestName) {
+        const { rev } = await api.saveShared(
+          t.token,
+          t.data,
+          t.guestName,
+          revRef.current ?? undefined,
+        );
+        revRef.current = rev;
+        flash('✓ Сохранено');
       }
       setSaveError(null);
       retries.current = 0;
     } catch (e) {
       const msg = errMsg(e);
       flash('⚠ ' + msg);
+      // A conflict is not a failure to retry — someone else changed the tree,
+      // so resending would overwrite them. Stop and ask for a reload.
+      if (e instanceof ApiError && e.status === 409) {
+        pending.current = null;
+        setHasPendingSave(false);
+        retries.current = 0;
+        setSaveError(msg);
+        return;
+      }
       // Only retry what retrying can fix. A 4xx is a property of the payload or
       // the session (too large, invalid, token expired) — re-sending identical
       // bytes every few seconds would spin forever behind a banner telling the
@@ -198,8 +265,19 @@ export function useTreeSession(source: TreeSource | null): TreeSession {
 
   const scheduleSave = useCallback(
     (next: Tree) => {
-      if (!source || source.kind !== 'tree') return;
-      pending.current = { id: source.id, mode, data: { root: next.root, p: next.p } };
+      if (!source) return;
+      const data = { root: next.root, p: next.p };
+      if (source.kind === 'tree') {
+        pending.current = { id: source.id, mode, data };
+      } else if (source.kind === 'share' && mode === 'guest') {
+        // Without a name there is nothing to attribute the edit to, and the
+        // server rejects the write — so don't queue one.
+        const guestName = getGuestName().trim();
+        if (!guestName) return;
+        pending.current = { token: source.token, mode, data, guestName };
+      } else {
+        return; // demo / read-only share — nothing to persist
+      }
       setHasPendingSave(true);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => void flushSave(), SAVE_DEBOUNCE_MS);
@@ -337,7 +415,9 @@ export function useTreeSession(source: TreeSource | null): TreeSession {
     flash('Изменения отменены');
   }, [mode, source, tree, flash]);
 
-  const editable = mode !== 'view';
+  // A guest may only edit once they have given a name — that name is the sole
+  // attribution their changes will ever carry.
+  const editable = mode === 'guest' ? !!guestName.trim() : mode !== 'view';
   const dirtyOut = useMemo(() => (mode === 'proposal' ? dirty : false), [mode, dirty]);
 
   // Warn before closing the tab while a write is still queued or failing.
@@ -360,6 +440,11 @@ export function useTreeSession(source: TreeSource | null): TreeSession {
     saveMsg,
     saveError,
     hasPendingSave,
+    guestName,
+    setGuestName: (n: string) => {
+      setGuestName(n);
+      setGuestNameState(n.trim().slice(0, 60));
+    },
     editable,
     photoBusy,
     dirty: dirtyOut,
