@@ -1,10 +1,23 @@
+export { MAX_PHOTOS } from './types';
+
 export const MAX_PHOTO_DIM = 820;
 export const PHOTO_QUALITY = 0.72;
+/** Largest file we will accept from the picker, before compression. */
+export const MAX_PHOTO_FILE_BYTES = 20 * 1024 * 1024;
+
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+  return Math.max(1, Math.round(bytes / 1024)) + ' КБ';
+}
 
 /**
  * Reads an image File, downscales it to fit within `maxDim`, and returns a
  * compressed JPEG data URL. Keeps uploads to ~tens–low-hundreds of KB so photos
  * fit comfortably inside the tree document.
+ *
+ * Files above `MAX_PHOTO_FILE_BYTES` are rejected before any read: decoding a
+ * huge image costs width*height*4 bytes of canvas memory and can hang or crash
+ * the tab, so the guard has to come first.
  */
 export async function fileToCompressedDataUrl(
   file: File,
@@ -13,6 +26,11 @@ export async function fileToCompressedDataUrl(
 ): Promise<string> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Это не изображение');
+  }
+  if (file.size > MAX_PHOTO_FILE_BYTES) {
+    throw new Error(
+      `Файл слишком большой (${formatBytes(file.size)}). Максимум — ${formatBytes(MAX_PHOTO_FILE_BYTES)}.`,
+    );
   }
 
   const dataUrl = await new Promise<string>((resolve, reject) => {

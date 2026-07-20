@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { genOf, lifeFull, lifeSpan, parentsOf, relLabel } from '../lib/treeUtils';
+import {
+  genOf,
+  lifeFull,
+  lifeSpan,
+  parentsOf,
+  parentsWithCoParent,
+  relLabel,
+  spousesOf,
+} from '../lib/treeUtils';
 import type { PeopleMap, Person, Relation, Sex } from '../lib/types';
+import { MAX_PHOTOS, MAX_PHOTO_FILE_BYTES, formatBytes } from '../lib/image';
 import { SexDot } from './shared';
-
-const MAX_PHOTOS = 5;
 
 export interface ModalEditOps {
   rename: (id: string, name: string) => void;
   setSex: (id: string, sex: Sex) => void;
   setDates: (id: string, b: string, d: string) => void;
   setOrigin: (id: string, origin: string) => void;
+  setNote: (id: string, note: string) => void;
   addRelative: (anchorId: string, relation: Relation, name: string, sex: Sex) => void;
   remove: (id: string) => void;
   addPhotos: (id: string, files: File[]) => void;
@@ -79,11 +87,28 @@ function PhotoStrip({
     <div className="photo-block">
       <div className="rel-label">
         Фотографии ({photos.length}/{MAX_PHOTOS})
+        {editable && (
+          <span className="photo-hint"> · до {formatBytes(MAX_PHOTO_FILE_BYTES)} на файл</span>
+        )}
       </div>
       <div className="photo-strip">
         {photos.map((src, i) => (
           <div className="photo" key={i}>
-            <img src={src} alt={'Фото ' + (i + 1)} onClick={() => onOpen(src)} loading="lazy" />
+            <img
+              src={src}
+              alt={'Фото ' + (i + 1)}
+              role="button"
+              tabIndex={0}
+              aria-label={'Открыть фото ' + (i + 1)}
+              onClick={() => onOpen(src)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpen(src);
+                }
+              }}
+              loading="lazy"
+            />
             {editable && (
               <button
                 type="button"
@@ -150,6 +175,7 @@ function PersonEditPanel({
   const [b, setB] = useState(person.b || '');
   const [d, setD] = useState(person.d || '');
   const [origin, setOrigin] = useState(person.origin || '');
+  const [note, setNote] = useState(person.note || '');
   const [addRel, setAddRel] = useState<Relation | null>(null);
   const [relName, setRelName] = useState('');
   const [relSex, setRelSex] = useState<Sex>(1);
@@ -164,6 +190,9 @@ function PersonEditPanel({
   };
   const commitOrigin = () => {
     if (origin !== (person.origin || '')) ops.setOrigin(id, origin);
+  };
+  const commitNote = () => {
+    if (note !== (person.note || '')) ops.setNote(id, note);
   };
   const doAdd = () => {
     const v = relName.trim();
@@ -211,6 +240,18 @@ function PersonEditPanel({
       <label className="ef-row">
         <span>Родовое место</span>
         <input value={origin} onChange={(e) => setOrigin(e.target.value)} onBlur={commitOrigin} placeholder="—" />
+      </label>
+      <label className="ef-row">
+        <span>Заметка / история</span>
+        <textarea
+          className="ef-note"
+          rows={4}
+          maxLength={4000}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={commitNote}
+          placeholder="Кем был, чем занимался, семейные предания…"
+        />
       </label>
 
       <div className="rel-label" style={{ marginTop: 16 }}>
@@ -285,6 +326,9 @@ export function DetailModal({
   onGoto: (id: string) => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  // Element to hand focus back to when the modal closes.
+  const restoreRef = useRef<HTMLElement | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   // Blur the focused field first so its onBlur commit fires before the modal unmounts.
@@ -293,6 +337,47 @@ export function DetailModal({
     if (el && typeof el.blur === 'function') el.blur();
     onClose();
   }, [onClose]);
+
+  // Remember the opener once, and restore focus to it on unmount — otherwise
+  // focus falls to <body> and keyboard users restart from the top of the page.
+  useEffect(() => {
+    restoreRef.current = document.activeElement as HTMLElement | null;
+    return () => {
+      const el = restoreRef.current;
+      if (el && document.contains(el)) el.focus();
+    };
+  }, []);
+
+  /**
+   * Focus trap. Without it Tab walks out of the dialog into the page behind,
+   * where the next stops include "delete this tree" — a destructive control the
+   * overlay is covering, so the user cannot see what they are activating.
+   */
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const rootEl = modalRef.current;
+      if (!rootEl) return;
+      const focusable = Array.from(
+        rootEl.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || !rootEl.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !rootEl.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -312,8 +397,13 @@ export function DetailModal({
   const person = p[id];
   if (!person) return null;
 
+  // Recorded parents only. The co-parent inference is shown separately and
+  // labelled as an inference — presenting a father's only spouse as the
+  // biological mother would state something the owner never entered, and it is
+  // wrong outright for a remarriage or a child from an earlier marriage.
   const parents = parentsOf(p, id);
-  const spouses = (person.sp || []).slice();
+  const inferred = parentsWithCoParent(p, id).filter((x) => !parents.includes(x));
+  const spouses = spousesOf(p, id);
   const kids = (person.c || []).slice();
   const photos = person.photos || [];
   const lf = lifeFull(p, id);
@@ -330,7 +420,7 @@ export function DetailModal({
         if ((e.target as HTMLElement).classList.contains('overlay')) close();
       }}
     >
-      <div className="modal">
+      <div className="modal" ref={modalRef}>
         <div className="modal-top">
           <button ref={closeRef} className="modal-close" onClick={close} aria-label="Закрыть">
             ✕
@@ -358,7 +448,32 @@ export function DetailModal({
           {editable && ops && (
             <PersonEditPanel key={id} id={id} person={person} isRoot={id === root} ops={ops} />
           )}
+          {person.note && !editable && (
+            <div className="note-block">
+              <div className="rel-label">Заметка</div>
+              <p className="note-text">{person.note}</p>
+            </div>
+          )}
+          {person.origin && !editable && (
+            <div className="note-block">
+              <div className="rel-label">Родовое место</div>
+              <p className="note-text">{person.origin}</p>
+            </div>
+          )}
           <RelBlock label="Родители" p={p} ids={parents} onGoto={onGoto} />
+          {inferred.length > 0 && (
+            <div className="rel-block">
+              <div className="rel-label">
+                Супруг(а) родителя
+                <span className="rel-hint"> · не указан(а) как родитель</span>
+              </div>
+              <div className="rel-chips">
+                {inferred.map((sid) => (
+                  <Chip key={sid} p={p} id={sid} onGoto={onGoto} />
+                ))}
+              </div>
+            </div>
+          )}
           <RelBlock label={person.s === 1 ? 'Супруга' : 'Супруг'} p={p} ids={spouses} onGoto={onGoto} />
           <RelBlock label={'Дети (' + kids.filter((k) => p[k]).length + ')'} p={p} ids={kids} onGoto={onGoto} />
         </div>

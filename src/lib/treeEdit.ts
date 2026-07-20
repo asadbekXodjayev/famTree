@@ -1,3 +1,5 @@
+import { spousesOf } from './treeUtils';
+import { MAX_PHOTOS } from './types';
 import type { PeopleMap, Person, Relation, Sex } from './types';
 
 export interface WorkingTree {
@@ -16,13 +18,16 @@ function mut(p: PeopleMap, id: string): Person {
   return copy;
 }
 
+/** Mirror of the backend nextId: safe-integer keys only, then a collision sweep. */
 function nextId(p: PeopleMap): string {
   let mx = 0;
   for (const k of Object.keys(p)) {
-    const n = parseInt(k, 10);
-    if (!Number.isNaN(n) && n > mx) mx = n;
+    const n = Number(k);
+    if (Number.isSafeInteger(n) && n > mx) mx = n;
   }
-  return String(mx + 1);
+  let candidate = mx + 1;
+  while (Object.prototype.hasOwnProperty.call(p, String(candidate))) candidate++;
+  return String(candidate);
 }
 
 function parentsOf(p: PeopleMap, id: string): string[] {
@@ -47,9 +52,19 @@ export function addRelative(
   p[id] = np;
 
   switch (relation) {
-    case 'child':
-      mut(p, anchorId).c.push(id);
+    case 'child': {
+      const anchor = mut(p, anchorId);
+      anchor.c.push(id);
+      // Mirror of the backend: link an unambiguous co-parent so the mother is a
+      // real parent edge, not merely the father's spouse. Both directions, since
+      // legacy trees record `sp` on one partner only.
+      const coParents = spousesOf(p, anchorId).filter((sid) => sid !== id);
+      if (coParents.length === 1) {
+        const co = mut(p, coParents[0]);
+        if (!co.c.includes(id)) co.c.push(id);
+      }
       break;
+    }
     case 'spouse':
       mut(p, anchorId).sp.push(id);
       np.sp.push(anchorId);
@@ -97,7 +112,7 @@ export function setSex(tree: WorkingTree, id: string, sex: Sex): WorkingTree {
 export function setField(
   tree: WorkingTree,
   id: string,
-  field: 'b' | 'd' | 'origin',
+  field: 'b' | 'd' | 'origin' | 'note',
   value: string,
 ): WorkingTree {
   const p = shallowMap(tree.p);
@@ -108,20 +123,65 @@ export function setField(
   return { root: tree.root, p };
 }
 
-export function deletePerson(tree: WorkingTree, id: string): WorkingTree {
-  if (id === tree.root) throw new Error('Родоначальника нельзя удалить');
-  const p = shallowMap(tree.p);
+/**
+ * Mirror of the backend cascade: only take a child down when every one of its
+ * parents is also being deleted, so removing a mother does not erase children
+ * whose father survives. Fixpoint, because a co-parent may be removed later.
+ */
+function cascadeSet(p: PeopleMap, id: string): Set<string> {
+  const parents = new Map<string, string[]>();
+  for (const pid of Object.keys(p)) {
+    for (const c of p[pid].c) {
+      if (!parents.has(c)) parents.set(c, []);
+      parents.get(c)!.push(pid);
+    }
+  }
   const toDelete = new Set<string>([id]);
-  const stack = [id];
-  while (stack.length) {
-    const cur = stack.pop()!;
-    for (const c of p[cur]?.c || []) {
-      if (p[c] && !toDelete.has(c)) {
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const cur of Array.from(toDelete)) {
+      for (const c of p[cur]?.c || []) {
+        if (!p[c] || toDelete.has(c)) continue;
+        if ((parents.get(c) || []).some((par) => !toDelete.has(par))) continue;
         toDelete.add(c);
-        stack.push(c);
+        grew = true;
       }
     }
   }
+  return toDelete;
+}
+
+/** Everyone the UI shows: reachable from root by descent, plus their spouses. */
+function reachableSet(p: PeopleMap, root: string): Set<string> {
+  const seen = new Set<string>();
+  const stack = [root];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (seen.has(cur) || !p[cur]) continue;
+    seen.add(cur);
+    for (const c of p[cur].c) if (!seen.has(c)) stack.push(c);
+    for (const s of p[cur].sp) if (!seen.has(s)) stack.push(s);
+  }
+  return seen;
+}
+
+/**
+ * How many people `deletePerson(id)` would actually remove — cascade plus
+ * anyone it strands. The confirmation dialog must not overstate this.
+ */
+export function countDeletion(tree: WorkingTree, id: string): number {
+  if (!tree.p[id]) return 0;
+  const probe = deletePerson(tree, id);
+  return Object.keys(tree.p).length - Object.keys(probe.p).length;
+}
+
+export function deletePerson(tree: WorkingTree, id: string): WorkingTree {
+  if (id === tree.root) throw new Error('Родоначальника нельзя удалить');
+  const p = shallowMap(tree.p);
+  const toDelete = cascadeSet(p, id);
+  // Cyclic data (reachable via JSON import) could otherwise drag the root into
+  // the cascade, producing a document the server rejects on every save.
   if (toDelete.has(tree.root)) throw new Error('Это действие удалит родоначальника');
   for (const pid of Object.keys(p)) {
     if (toDelete.has(pid)) continue;
@@ -132,7 +192,30 @@ export function deletePerson(tree: WorkingTree, id: string): WorkingTree {
       p[pid] = { ...per, c: nc, sp: ns };
     }
   }
+  const reachableBefore = reachableSet(tree.p, tree.root);
   for (const d of toDelete) delete p[d];
+
+  // Sweep anyone this delete stranded — see the backend comment. A wife hangs
+  // off the tree only via her husband, so deleting him can hide her and any
+  // children who survived because she was their other parent.
+  const reachableAfter = reachableSet(p, tree.root);
+  let stranded = false;
+  for (const pid of Object.keys(p)) {
+    if (reachableBefore.has(pid) && !reachableAfter.has(pid)) {
+      delete p[pid];
+      stranded = true;
+    }
+  }
+  if (stranded) {
+    for (const pid of Object.keys(p)) {
+      const per = p[pid];
+      const nc = per.c.filter((c) => p[c]);
+      const ns = per.sp.filter((s) => p[s]);
+      if (nc.length !== per.c.length || ns.length !== per.sp.length) {
+        p[pid] = { ...per, c: nc, sp: ns };
+      }
+    }
+  }
   return { root: tree.root, p };
 }
 
@@ -140,7 +223,7 @@ export function addPhoto(tree: WorkingTree, id: string, dataUrl: string): Workin
   const p = shallowMap(tree.p);
   const per = mut(p, id);
   per.photos = per.photos ? [...per.photos] : [];
-  if (per.photos.length >= 5) throw new Error('Максимум 5 фотографий');
+  if (per.photos.length >= MAX_PHOTOS) throw new Error(`Максимум ${MAX_PHOTOS} фотографий`);
   per.photos.push(dataUrl);
   return { root: tree.root, p };
 }

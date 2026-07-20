@@ -1,3 +1,6 @@
+/** Photos per person. Mirrored by MAX_PHOTOS in the backend's treeOps.ts. */
+export const MAX_PHOTOS = 5;
+
 export type Sex = 1 | 2;
 export type Relation = 'child' | 'spouse' | 'parent' | 'sibling';
 export type TreeRole = 'owner' | 'editor';
@@ -11,6 +14,8 @@ export interface Person {
   b?: string;
   d?: string;
   origin?: string;
+  /** Free-form biography / family story. */
+  note?: string;
   /** Up to 5 photos, each a compressed image data URL. */
   photos?: string[];
 }

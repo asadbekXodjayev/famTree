@@ -64,6 +64,60 @@ export function parentsOf(p: PeopleMap, id: string): string[] {
   return res;
 }
 
+/** id -> spouse ids, resolved in both directions. Build once per tree. */
+export type SpouseIndex = Map<string, string[]>;
+
+/**
+ * Index every spouse link from both sides in a single pass.
+ *
+ * Older trees recorded `sp` on only one partner, so a reverse lookup is what
+ * makes those wives visible at all. Doing that lookup per person would be
+ * O(n²) across a render, hence the shared index.
+ */
+export function buildSpouseIndex(p: PeopleMap): SpouseIndex {
+  const idx: SpouseIndex = new Map();
+  const link = (a: string, b: string) => {
+    if (a === b || !p[a] || !p[b]) return;
+    const list = idx.get(a);
+    if (!list) idx.set(a, [b]);
+    else if (list.indexOf(b) === -1) list.push(b);
+  };
+  for (const id of Object.keys(p)) {
+    for (const sid of p[id].sp || []) {
+      link(id, sid);
+      link(sid, id);
+    }
+  }
+  return idx;
+}
+
+/**
+ * Spouses of `id`, resolved in both directions. Pass `idx` on hot paths (the
+ * tree render); without it this falls back to a one-off scan.
+ */
+export function spousesOf(p: PeopleMap, id: string, idx?: SpouseIndex): string[] {
+  if (idx) return idx.get(id) || [];
+  return (buildSpouseIndex(p).get(id) || []).slice();
+}
+
+/** 'жена' / 'муж' for a spouse, chosen from the spouse's own sex. */
+export function spouseLabel(p: PeopleMap, spouseId: string): string {
+  return p[spouseId]?.s === 2 ? 'жена' : 'муж';
+}
+
+/**
+ * Both parents of `id`. Anyone listing `id` as a child counts directly; when
+ * that yields a single parent we also surface their spouse as the co-parent, so
+ * a mother shows up even in trees where children were only ever attached to the
+ * father.
+ */
+export function parentsWithCoParent(p: PeopleMap, id: string, idx?: SpouseIndex): string[] {
+  const direct = parentsOf(p, id);
+  if (direct.length !== 1) return direct;
+  const spouses = spousesOf(p, direct[0], idx);
+  return spouses.length === 1 ? [direct[0], spouses[0]] : direct;
+}
+
 /** The direct male-line-style chain: follow while there is exactly one living child. */
 export function buildChain(p: PeopleMap, root: string): string[] {
   const chain = [root];

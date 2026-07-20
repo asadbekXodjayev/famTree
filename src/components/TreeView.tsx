@@ -1,15 +1,18 @@
 import { Fragment, useCallback, useMemo, useState } from 'react';
 import type { TreeSession } from '../hooks/useTreeSession';
+import { countDeletion } from '../lib/treeEdit';
 import { exportTreePng } from '../lib/png';
 import {
   buildChain,
+  buildSpouseIndex,
   computeStats,
-  descCount,
   everyoneWithKids,
   lifeSpan,
   plural,
   recomputeMatches,
   relLabel,
+  spouseLabel,
+  spousesOf,
 } from '../lib/treeUtils';
 import { BranchList, type RenderCtx } from './Branches';
 import { DetailModal, type ModalEditOps } from './DetailModal';
@@ -29,9 +32,12 @@ export function TreeView({ session }: { session: TreeSession }) {
   const q = query.trim();
   const { matchIds, ancestorsOfMatch } = useMemo(() => recomputeMatches(p, q), [p, q]);
   const stats = useMemo(() => computeStats(p, root), [p, root]);
+  const spouseIdx = useMemo(() => buildSpouseIndex(p), [p]);
   const chain = useMemo(() => buildChain(p, root), [p, root]);
   const lastChainId = chain[chain.length - 1];
-  const branchGen = chain.length - 1;
+  // Branch cards render the *children* of the last chain member, so their
+  // generation is one deeper than his (chain.length - 1).
+  const branchGen = chain.length;
   const branchIds = (p[lastChainId]?.c || []).filter((id) => p[id]);
 
   const toggle = useCallback((id: string) => {
@@ -54,19 +60,21 @@ export function TreeView({ session }: { session: TreeSession }) {
         setSex: session.setSex,
         setDates: session.setDates,
         setOrigin: session.setOrigin,
+        setNote: session.setNote,
         addRelative: session.addRelative,
         remove: (id) => {
-          const cnt = descCount(p, id, new Set());
           if (id === root) {
             alert('Родоначальника нельзя удалить.');
             return;
           }
-          if (
-            !window.confirm(
-              '«' + p[id].n + '» и его потомков (' + cnt + ') удалить? Это действие необратимо.',
-            )
-          )
-            return;
+          // Count what will ACTUALLY go: children with a surviving parent stay,
+          // but anyone the delete strands is swept up too.
+          const total = countDeletion({ root, p }, id);
+          const others = Math.max(0, total - 1);
+          const msg = others
+            ? `Удалить «${p[id].n}» и ещё ${others} ${plural(others, 'человека', 'человека', 'человек')}? Это действие необратимо.`
+            : `Удалить «${p[id].n}»? Это действие необратимо.`;
+          if (!window.confirm(msg)) return;
           session.deletePerson(id);
           if (selected === id) setSelected(null);
         },
@@ -81,6 +89,7 @@ export function TreeView({ session }: { session: TreeSession }) {
     matchIds,
     ancestors: ancestorsOfMatch,
     openSet,
+    spouseIdx,
     toggle,
     openDetail,
   };
@@ -114,15 +123,6 @@ export function TreeView({ session }: { session: TreeSession }) {
     }
   };
 
-  // spouse pills belong to the deepest chain member that has any
-  let pillOwner: string | null = null;
-  for (let i = chain.length - 1; i >= 0; i--) {
-    if ((p[chain[i]].sp || []).length) {
-      pillOwner = chain[i];
-      break;
-    }
-  }
-
   const branchTitle =
     branchIds.length + ' ' + plural(branchIds.length, 'ветвь', 'ветви', 'ветвей') + ' рода';
   const branchSub = branchIds.length
@@ -143,6 +143,15 @@ export function TreeView({ session }: { session: TreeSession }) {
         onRefresh={() => void session.reload()}
         saveMsg={session.saveMsg}
       />
+
+      {session.saveError && (
+        <div className="save-error-bar" role="alert">
+          <span>
+            ⚠ Изменения не сохранены: {session.saveError}. Повторяем автоматически — не закрывайте
+            вкладку.
+          </span>
+        </div>
+      )}
 
       {session.mode === 'proposal' && (
         <div className="propose-bar">
@@ -198,35 +207,31 @@ export function TreeView({ session }: { session: TreeSession }) {
                   <div className="chain-name">{p[id].n}</div>
                   <div className="chain-role">{relLabel(i, p[id].s === 2)}</div>
                   {ls && <div className="chain-dates">{ls}</div>}
+                  {spousesOf(p, id, spouseIdx).map((spId) => {
+                    const sls = lifeSpan(p, spId);
+                    return (
+                      <button
+                        key={spId}
+                        type="button"
+                        className="chain-spouse"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDetail(spId);
+                        }}
+                        // Stop Enter/Space reaching the enclosing chain-box handler,
+                        // which would otherwise open the wrong person's card.
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="chain-spouse-role">{spouseLabel(p, spId)}</span>
+                        <span className="chain-spouse-name">{p[spId].n}</span>
+                        {sls && <span className="chain-spouse-dates">{sls}</span>}
+                      </button>
+                    );
+                  })}
                 </div>
               </Fragment>
             );
           })}
-        </div>
-
-        <div className="spouse-row">
-          {pillOwner &&
-            (p[pillOwner].sp || [])
-              .filter((s) => p[s])
-              .map((spId) => {
-                const label = p[spId].s === 1 ? 'муж' : 'жена';
-                const ls = lifeSpan(p, spId);
-                return (
-                  <div
-                    key={spId}
-                    className="spouse-pill"
-                    tabIndex={0}
-                    role="button"
-                    onClick={() => openDetail(spId)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') openDetail(spId);
-                    }}
-                  >
-                    {label} · <b>{p[spId].n}</b>
-                    {ls ? ' · ' + ls : ''}
-                  </div>
-                );
-              })}
         </div>
 
         <div className="legend">

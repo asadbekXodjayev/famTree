@@ -1,4 +1,5 @@
-import { descCount, lifeSpan, relLabel } from '../lib/treeUtils';
+import { descCount, lifeSpan, relLabel, spouseLabel, spousesOf } from '../lib/treeUtils';
+import type { SpouseIndex } from '../lib/treeUtils';
 import type { PeopleMap } from '../lib/types';
 import { Highlighted, SexDot } from './shared';
 
@@ -8,8 +9,41 @@ export interface RenderCtx {
   matchIds: Set<string>;
   ancestors: Set<string>;
   openSet: Set<string>;
+  /** Prebuilt so per-row spouse lookups stay O(1). */
+  spouseIdx: SpouseIndex;
   toggle: (id: string) => void;
   openDetail: (id: string) => void;
+}
+
+/**
+ * Spouses shown inline next to their partner. Without this a wife/mother only
+ * ever existed in the detail modal, so the tree read as an all-male lineage.
+ */
+function SpouseChips({ id, ctx }: { id: string; ctx: RenderCtx }) {
+  const { p, query, matchIds, openDetail, spouseIdx } = ctx;
+  const spouses = spousesOf(p, id, spouseIdx);
+  if (!spouses.length) return null;
+  return (
+    <span className="sp-chips">
+      {spouses.map((sid) => (
+        <button
+          key={sid}
+          type="button"
+          className={'sp-chip' + (matchIds.has(sid) ? ' hit' : '')}
+          title={spouseLabel(p, sid) + ': ' + p[sid].n}
+          onClick={(e) => {
+            e.stopPropagation();
+            openDetail(sid);
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <span className="sp-role">{spouseLabel(p, sid)}</span>
+          <SexDot sex={p[sid].s} deceased={!!p[sid].d} />
+          <Highlighted name={p[sid].n} query={query} />
+        </button>
+      ))}
+    </span>
+  );
 }
 
 function SubItem({
@@ -73,6 +107,7 @@ function SubItem({
         <span className="sub-meta">
           {'· ' + relLabel(gen, person.s === 2) + (kids.length ? ' · потомков: ' + count : '')}
         </span>
+        <SpouseChips id={id} ctx={ctx} />
       </div>
       <div className="sub-children">
         {kids.map((cid) => (
@@ -130,6 +165,7 @@ function BranchCard({ id, idx, gen, ctx }: { id: string; idx: number; gen: numbe
           </div>
           <div className="branch-meta">
             {relLabel(gen, person.s === 2) + (count ? ' · потомков: ' + count : '')}
+            <SpouseChips id={id} ctx={ctx} />
           </div>
         </div>
         <div className="branch-chevron">›</div>
